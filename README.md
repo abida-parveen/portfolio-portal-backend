@@ -36,7 +36,7 @@ Later, I plan to add more functionality to support a complete portfolio portal.
 1. Clone the repo:
 
 ```bash
-git clone https://github.com/your-username/portfolio-portal-backend.git
+git clone https://github.com/abida-parveen/portfolio-portal-backend.git
 cd portfolio-portal-backend
 
 2. Install dependencies:
@@ -60,7 +60,10 @@ FRONTEND_URL=your_frontend_url
 
 npm start or if you're using nodemon for development: npm run dev 
 
-The server will start on: http://localhost:8080
+The server will start on: http://localhost:8080 
+```
+
+--- 
 
 This project is a work-in-progress for learning and practice purposes.
 If you find any issues, mistakes, or have suggestions to improve it — feel free to open an issue or create a pull request.

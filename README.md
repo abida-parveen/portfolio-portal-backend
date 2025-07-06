@@ -29,7 +29,7 @@ Later, I plan to add more functionality to support a complete portfolio portal.
 - express-validator
 - dotenv
 - express-rate-limit
-- xss-clean
+- typescript
 
 ## 🔧 Setup
 

@@ -5,6 +5,7 @@ import {
   createUser,
   loginUser,
   resendEmail,
+  resetPassword,
   resetPasswordToken,
   verifyEmail,
   verifyToken,
@@ -53,21 +54,22 @@ router.post(
 );
 
 router.post(
-  "/reset-password-token",
-  emailRateLimiter,
-  [body("email", "Enter a valid email").isEmail()],
-  validateRequest,
-  resetPasswordToken
-);
-
-router.post(
   "/reset-password",
   [
     body("password", "Password must be atleast 6 characters").isLength({
       min: 6,
     }),
   ],
-  validateRequest
+  validateRequest,
+  resetPassword
+);
+
+router.post(
+  "/reset-password-token",
+  emailRateLimiter,
+  [body("email", "Enter a valid email").isEmail()],
+  validateRequest,
+  resetPasswordToken
 );
 
 router.post(

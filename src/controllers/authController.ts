@@ -2,13 +2,13 @@ import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import client from "../db"; // Import the database client
-import crypto from "crypto";
-import { sendEmail } from "../services/mailService";
-import {
-  getResetPasswordEmail,
-  getVerificationEmail,
-} from "../templates/emailTemplates";
 import dotenv from "dotenv";
+import {
+  generateEmailToken,
+  sendResetPasswordEmail,
+  sendVerificationEmail,
+} from "../utils/authUtils";
+import { validateToken } from "../utils/tokenUtils";
 
 dotenv.config();
 
@@ -98,18 +98,12 @@ export const createUser = async (
         `INSERT INTO users (name, email, password) VALUES ($1, $2, $3) RETURNING id, name, email`,
         [name, email, hashedPassword]
       );
-      const token = crypto.randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + 1000 * 60 * 15);
+      const { token, expiresAt } = generateEmailToken();
       await client.query(
         `INSERT INTO email_verification_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)`,
         [user.rows[0].id, token, expiresAt]
       );
-      const verificationLink = `http://localhost:${process.env.PORT}/api/auth/verify-email?token=${token}`;
-      await sendEmail({
-        to: email,
-        subject: "Please verify your email",
-        html: getVerificationEmail(name, verificationLink),
-      });
+      await sendVerificationEmail(`${process.env.PORT}`, token, email, name);
       res.status(201).json({
         message:
           "Verification email has been sent to your email. Please verify your email. If you don't receive the email, please check your spam folder. If you still can't find it, please contact us.",
@@ -158,55 +152,40 @@ export const verifyEmail = async (
   req: Request,
   res: Response
 ): Promise<void> => {
-  const { token } = req.query;
+  const token = req.query.token ? req.query.token.toString() : undefined;
   try {
-    const verification_token = await client.query(
-      "SELECT * FROM email_verification_tokens WHERE token = $1",
-      [token]
-    );
-    if (verification_token.rows.length < 1) {
-      res.status(404).json({
-        error: { message: "Invalid or expired verification link. Try again!" },
+    const validatedToken = await validateToken(token);
+    if (validatedToken.error) {
+      res
+        .status(validatedToken.error.status)
+        .json({ message: validatedToken.error.message });
+    } else {
+      const user_id = validatedToken.success.token.user_id;
+      const user = await client.query("SELECT email FROM users WHERE id = $1", [
+        user_id,
+      ]);
+      await client.query(
+        "UPDATE users SET is_email_verified = true WHERE id = $1",
+        [user_id]
+      );
+      await client.query(
+        "DELETE FROM email_verification_tokens WHERE token = $1",
+        [token]
+      );
+      const data = {
+        user: {
+          id: user_id,
+          email: user.rows[0].email,
+        },
+      };
+      const authtoken = jwt.sign(data, process.env.JWT_SECRET_KEY!, {
+        expiresIn: "1h",
+      });
+      res.status(200).json({
+        token: authtoken,
+        message: "Email verified successfully!",
       });
       return;
-    } else {
-      const expiresAt = new Date(verification_token.rows[0].expires_at);
-      const now = new Date();
-      if (expiresAt < now) {
-        res.status(400).json({
-          error: {
-            message: "Invalid or expired verification link. Try again!",
-          },
-        });
-      } else {
-        const user_id = verification_token.rows[0].user_id;
-        const user = await client.query(
-          "SELECT email FROM users WHERE id = $1",
-          [user_id]
-        );
-        await client.query(
-          "UPDATE users SET is_email_verified = true WHERE id = $1",
-          [user_id]
-        );
-        await client.query(
-          "DELETE FROM email_verification_tokens WHERE token = $1",
-          [token]
-        );
-        const data = {
-          user: {
-            id: user_id,
-            email: user.rows[0].email,
-          },
-        };
-        const authtoken = jwt.sign(data, process.env.JWT_SECRET_KEY!, {
-          expiresIn: "1h",
-        });
-        res.status(200).json({
-          token: authtoken,
-          message: "Email verified successfully!",
-        });
-        return;
-      }
     }
   } catch (error) {
     console.error(error);
@@ -231,18 +210,17 @@ export const resendEmail = async (
       [email]
     );
     if (user.rows[0] && user.rows[0].id) {
-      const token = crypto.randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + 1000 * 60 * 15);
+      const { token, expiresAt } = generateEmailToken();
       await client.query(
         `INSERT INTO email_verification_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)`,
         [user.rows[0].id, token, expiresAt]
       );
-      const verificationLink = `http://localhost:${process.env.PORT}/api/auth/verify-email?token=${token}`;
-      await sendEmail({
-        to: email,
-        subject: "Please verify your email",
-        html: getVerificationEmail(user.rows[0].name, verificationLink),
-      });
+      await sendVerificationEmail(
+        `${process.env.PORT}`,
+        token,
+        email,
+        user.rows[0].name
+      );
       res.status(201).json({
         message:
           "Verification email has been sent to your email. Please verify your email. If you don't receive the email, please check your spam folder. If you still can't find it, please contact us.",
@@ -276,18 +254,17 @@ export const resetPasswordToken = async (
       email,
     ]);
     if (user.rows.length > 0) {
-      const token = crypto.randomBytes(32).toString("hex");
-      const expiresAt = new Date(Date.now() + 1000 * 60 * 15);
+      const { token, expiresAt } = generateEmailToken();
       await client.query(
         `INSERT INTO email_verification_tokens (user_id, token, expires_at, type) VALUES ($1, $2, $3, $4)`,
         [user.rows[0].id, token, expiresAt, "forgot_password"]
       );
-      const verificationLink = `http://localhost:${process.env.PORT}/api/auth/reset-password?token=${token}`;
-      await sendEmail({
-        to: email,
-        subject: "Reset your password",
-        html: getResetPasswordEmail(user.rows[0].name, verificationLink),
-      });
+      await sendResetPasswordEmail(
+        `${process.env.PORT}`,
+        token,
+        email,
+        user.rows[0].name
+      );
       res.status(200).json({
         message:
           "Forget password email sent successfully. Please check your email. And follow the link to reset your password.",
@@ -306,44 +283,29 @@ export const resetPassword = async (
   res: Response
 ): Promise<void> => {
   const { password } = req.body;
-  const token = req.query.token;
+  const token = req.query.token ? req.query.token.toString() : undefined;
   try {
-    const verification_token = await client.query(
-      "SELECT * FROM email_verification_tokens WHERE token = $1",
-      [token]
-    );
-    if (verification_token.rows.length < 1) {
-      res.status(404).json({
-        error: { message: "Invalid or expired reset link. Please try again." },
-      });
+    const validatedToken = await validateToken(token);
+    if (validatedToken.error) {
+      res
+        .status(validatedToken.error.status)
+        .json({ message: validatedToken.error.message });
       return;
     } else {
-      const expiresAt = new Date(verification_token.rows[0].expires_at);
-      const now = new Date();
-      if (expiresAt < now) {
-        res.status(400).json({
-          error: {
-            message:
-              "Invalid or expired reset link. Please request a new password reset.",
-          },
-        });
-        return;
-      } else {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const user_id = verification_token.rows[0].user_id;
-        await client.query("UPDATE users SET password = $1 WHERE id = $2", [
-          hashedPassword,
-          user_id,
-        ]);
-        await client.query(
-          "DELETE FROM email_verification_tokens WHERE token = $1",
-          [token]
-        );
-        res.status(200).json({
-          message: "Password reset successfully!",
-        });
-        return;
-      }
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user_id = validatedToken.success.token.user_id;
+      await client.query("UPDATE users SET password = $1 WHERE id = $2", [
+        hashedPassword,
+        user_id,
+      ]);
+      await client.query(
+        "DELETE FROM email_verification_tokens WHERE token = $1",
+        [token]
+      );
+      res.status(200).json({
+        message: "Password reset successfully!",
+      });
+      return;
     }
   } catch (err) {
     console.error(err);

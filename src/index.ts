@@ -7,8 +7,8 @@ dotenv.config();
 
 const app = express();
 
-// Read port from the environment variable or default to 3000
-const port = process.env.PORT || 3000;
+// Read port from the environment variable or default to 8080
+const port = process.env.PORT || 8080;
 
 // Middleware to handle JSON requests
 app.use(express.json());
